@@ -58,13 +58,13 @@ struct State{
     bool is_test;
     vector<Card> hand;
     vector<Project> project;
-    int money = 0, total_get_money, pre_use_hand_id, L;
+    int money = 0, total_get_money, recent_use_hand_id, pre_hand_t, L;
 
     double best_expectation, worst_expectation, expectation;
     int best_project, worst_project;
 
-    State() : L(0) {}
-    explicit State(vector<Card> _hand, vector<Project> _project, bool _is_test) : hand(_hand), project(_project), is_test(_is_test), L(0) {
+    State() : L(0), pre_hand_t(-1) {}
+    explicit State(vector<Card> _hand, vector<Project> _project, bool _is_test) : hand(_hand), project(_project), is_test(_is_test), L(0), pre_hand_t(-1) {
         // 最初に期待値が最大・最小の project を求めておく
         bestWorstUpdate();
     }
@@ -88,7 +88,8 @@ struct State{
     }
 
     inline void useCard(int card_id, int work) { // カード使用
-        pre_use_hand_id = card_id;
+        recent_use_hand_id = card_id;
+        pre_hand_t = hand[card_id].t;
         if(hand[card_id].t == 0) { // 通常労働カード
             project[work].h -= hand[card_id].w * ( is_test ? pow(2,L) : 1 );
             if(project[work].h <= 0) {
@@ -146,7 +147,7 @@ struct State{
     }
 
     inline void buyCard(int card_id, const vector<Card> &cards) { // カード購入
-        hand[pre_use_hand_id] = cards[card_id];
+        hand[recent_use_hand_id] = cards[card_id];
         money -= cards[card_id].p * ( is_test ? pow(2,L) : 1 );
         return;
     }
@@ -156,14 +157,18 @@ struct State{
         int op = 0, best_card_expectation = 0;
         for(int j=0; j<N; j++) {
             // キャンセルカード : 現在の実装では不使用
-            if( hand[j].t == 2 || hand[j].t == 3 ) continue;
-
+            if( hand[j].t == 2 ) continue;
+            // 業務転換カード : 前回 best_project が遂行された場合のみ使用
+            if( hand[j].t == 3 && pre_hand_t == 0 ) {
+                best_card_expectation = (int)1e16;
+                op = j;
+                continue;
+            }
             // 増資カード : 最優先で使用
             if( hand[j].t == 4 ) {
                 op = j;
                 break;
             }
-
             // 労働カード : 労働力が高いものを使用
             int expectation = hand[j].w * (hand[j].t == 1 ? M : 1);
             if(  best_card_expectation < expectation ) {
