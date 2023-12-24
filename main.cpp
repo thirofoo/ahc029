@@ -324,18 +324,21 @@ struct Solver {
 
             // カード購入は貪欲
             int best_card = 0, best_price = (int)1e16;
+            double best_expectation = 0;
             for(int j=0; j<K; j++) {
                 if( cand_card[j].p > state.money ) continue; // そもそも購入不可は論外
-                if( (cand_card[j].t == 0 || cand_card[j].t == 1) && best_price != 1e16 ) {
+                if( cand_card[j].t == 0 || cand_card[j].t == 1 ) {
                     // 労働カードは費用対効果が高いものを選択
-                    if( cand_card[best_card].w * (cand_card[j].p+1) < cand_card[j].w * (cand_card[best_card].p+1) ) {
+                    if( best_expectation < (double)cand_card[j].w * (cand_card[j].t == 1 ? M : 1) / (cand_card[j].p+1) ) {
                         best_card = j;
+                        best_expectation = (double)cand_card[j].w * (cand_card[j].t == 1 ? M : 1) / (cand_card[j].p+1);
                     }
                 }
                 else if( cand_card[j].t == 4 ) {
-                    // 増資カードは変えるなら 100% 買うべき
+                    // 増資カードは購入可能なら 100% 買うべき
                     if( best_price > cand_card[j].p ) {
                         best_card = j;
+                        best_expectation = 1e16;
                         best_price = cand_card[j].p;
                     }
                 }
