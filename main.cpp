@@ -41,7 +41,7 @@ constexpr int T = 1000;
 constexpr int TEST_NUM = 800;
 static const vector<int> X = {20/2, 10/2, 10/2, 5/2, 3/2}; // 隠しパラメータの期待値
 constexpr int EX = (20 + 10 + 10 + 5 + 3) / 2;   // 隠しパラメータの期待値の総和
-int N, M, K, _, L;
+int N, M, K, _;
 
 struct Card {
     // t:種類, w:労働力, p:購入額
@@ -54,17 +54,18 @@ struct Project {
 };
 
 struct State{
+    bool is_test;
     vector<Card> hand;
     vector<Project> project;
-    int money = 0, total_get_money, pre_use_hand_id;
+    int money = 0, total_get_money, pre_use_hand_id, L;
 
-    State(){}
-    explicit State(vector<Card> hand, vector<Project> project) : hand(hand), project(project) {}
+    State() : L(0) {}
+    explicit State(vector<Card> _hand, vector<Project> _project, bool _is_test) : hand(_hand), project(_project), is_test(_is_test), L(0) {}
 
     inline void useCard(int card_id, int work) { // カード使用
         pre_use_hand_id = card_id;
         if(hand[card_id].t == 0) { // 通常労働カード
-            project[work].h -= hand[card_id].w;
+            project[work].h -= hand[card_id].w * ( is_test ? pow(2,L) : 1 );
             if(project[work].h <= 0) {
                 money += project[work].v;
                 total_get_money += project[work].v;
@@ -77,7 +78,7 @@ struct State{
         }
         else if(hand[card_id].t == 1) { // 全力労働カード
             for(int i=0; i<M; i++) {
-                project[i].h -= hand[card_id].w;
+                project[i].h -= hand[card_id].w * ( is_test ? pow(2,L) : 1 );
                 if(project[i].h <= 0) {
                     money += project[i].v;
                     total_get_money += project[i].v;
@@ -112,7 +113,7 @@ struct State{
 
     inline void buyCard(int card_id, const vector<Card> &cards) { // カード購入
         hand[pre_use_hand_id] = cards[card_id];
-        money -= cards[card_id].p;
+        money -= cards[card_id].p * ( is_test ? pow(2,L) : 1 );
         return;
     }
 
@@ -120,11 +121,14 @@ struct State{
         total_get_money = 0;
         useCard(card_id, sub);
         for(int i=turn; i<T; i++) {
+
+            // ~~~~ ここを貪欲にすべし ~~~~
+
             if( i != turn ) useCard(rand_int()%N, rand_int()%M);
             // 買えるカードを列挙 ⇒ 乱択で選択
             vector<int> can_buy;
             for(int j=0; j<K; j++) {
-                if(money >= tester[i][j].p) {
+                if(money >= tester[i][j].p * ( is_test ? pow(2,L) : 1 )) {
                     can_buy.emplace_back(j);
                 }
             }
@@ -137,12 +141,15 @@ struct State{
         total_get_money = 0;
         buyCard(card_id, test);
         for(int i=turn+1; i<T; i++) {
+
+            // ~~~~ ここを貪欲にすべし ~~~~
+
             useCard(rand_int()%N, rand_int()%M);
 
             // 買えるカードを列挙 ⇒ 乱択で選択
             vector<int> can_buy;
             for(int j=0; j<K; j++) {
-                if(money >= tester[i][j].p) {
+                if(money >= tester[i][j].p * ( is_test ? pow(2,L) : 1 )) {
                     can_buy.emplace_back(j);
                 }
             }
@@ -162,9 +169,8 @@ struct Solver {
 
     Solver() {
         this->input();
-        state = State(cards, project);
+        state = State(cards, project, false);
         cand_card.assign(N,Card{0,0,0});
-        L = 0;
 
         // 乱択test生成
         for(int i=0; i<TEST_NUM; i++){
@@ -175,35 +181,35 @@ struct Solver {
                     int rnd1 = rand_int()%EX;
                     if( k == 0 ) { // 先頭の無料カード
                         test_card.t = 0;
-                        test_card.w = pow(2,L);
+                        test_card.w = 1;
                         test_card.p = 0;
                     }
                     else if( rnd1 < X[0] ) { // 通常労働カード
                         test_card.t = 0;
                         int rnd2 = rand_int()%50 + 1;
-                        test_card.w = rnd2 * pow(2,L);
-                        test_card.p = max(1,min(10000,(int)round(gaussian(rnd2, (double)rnd2/3)))) * pow(2,L);
+                        test_card.w = rnd2;
+                        test_card.p = max(1,min(10000,(int)round(gaussian(rnd2, (double)rnd2/3))));
                     }
                     else if( rnd1 < X[0] + X[1] ) { // 全力労働カード
                         test_card.t = 1;
                         int rnd2 = rand_int()%50 + 1;
-                        test_card.w = rnd2 * pow(2,L);
-                        test_card.p = max(1,min(10000,(int)round(gaussian(rnd2, (double)rnd2/3)))) * pow(2,L);
+                        test_card.w = rnd2;
+                        test_card.p = max(1,min(10000,(int)round(gaussian(rnd2, (double)rnd2/3))));
                     }
                     else if( rnd1 < X[0] + X[1] + X[2] ) { // キャンセルカード
                         test_card.t = 2;
                         test_card.w = 0;
-                        test_card.p = rand_int()%11 * pow(2,L);
+                        test_card.p = rand_int()%11;
                     }
                     else if( rnd1 < X[0] + X[1] + X[2] + X[3] ) { // 業務転換カード
                         test_card.t = 3;
                         test_card.w = 0;
-                        test_card.p = rand_int()%11 * pow(2,L);
+                        test_card.p = rand_int()%11;
                     }
                     else { // 増資カード
                         test_card.t = 4;
                         test_card.w = 0;
-                        test_card.p = (rand_int()%801 + 200) * pow(2,L);
+                        test_card.p = (rand_int()%801 + 200);
                     }
                     test[j].emplace_back(test_card);
                 }
@@ -240,34 +246,41 @@ struct Solver {
         scores.assign(N,0);
 
         // 一番期待値の高い・低い project を探索
+        // ※ 少ないターンで終わるやつは優先度高め
         int best_project = 0, worst_project = 0;
+        double best_expectation = 0, worst_expectation = 1e16;
         for(int i=0; i<M; i++) {
+            double expectation = (double)(state.project[i].v+pow(2,state.L+5)) / state.project[i].h;
             // v/h が最大のものを選択
-            if( state.project[best_project].v * state.project[i].h < state.project[i].v * state.project[best_project].h ) {
+            if( best_expectation < expectation ) {
+                best_expectation = expectation;
                 best_project = i;
             }
             // v/h が最小のものを選択
-            if( state.project[worst_project].v * state.project[i].h > state.project[i].v * state.project[worst_project].h ) {
+            if( worst_expectation > expectation ) {
+                worst_expectation = expectation;
                 worst_project = i;
             }
         }
+        
         cerr << "Best Project: " << best_project << "\n" << flush;
+        cerr << "Best Expectation: " << best_expectation << "\n" << flush;
         cerr << "Worst Project: " << worst_project << "\n" << flush;
+        cerr << "Worst Expectation: " << worst_expectation << "\n" << flush;
         
         while (utility::mytm.elapsed() < end_time && counter) {
             for(int i=0; i<N; i++) {
                 // 労働カードは期待値が高いものを選択、業務転換カードは期待値が低いものを選択
                 State branch = state;
+                branch.is_test = true;
                 scores[i] += branch.simulate_use(turn, i, ( state.hand[i].t <= 1 ? best_project : worst_project ), tester[counter]);
             }
             counter--;
         }
 
-        cerr << "Get Money: \n" << flush;
         pair<int,int> best_op = pair(0,0); // 最低限初期解
-        int best_score = 0;
+        int best_score = -1;
         for(int i=0; i<N; i++) {
-            cerr << i << " " << scores[i] << '\n' << flush;
             if( best_score < scores[i] ) {
                 best_score = scores[i];
                 best_op = make_pair(i, ( state.hand[i].t <= 1 ? best_project : worst_project ));
@@ -289,10 +302,9 @@ struct Solver {
             cerr << '\n' << flush;
 
             auto [op1, sub] = monte_carlo_method(i); // カード使用を MonteCalro
-            state.useCard(op1, sub);
-            
             cerr << "Simulate_use: " << state.pre_use_hand_id << " " << sub << '\n' << flush;
             cout << op1 << " " << ( state.hand[op1].t == 0 || state.hand[op1].t == 2 ? sub : 0 ) << "\n" << flush;
+            state.useCard(op1, sub);            
 
             // 買えるカードを列挙 ⇒ 乱択で選択
             for(int j=0; j<M; j++) {
