@@ -340,6 +340,8 @@ struct Solver {
                 // }
             }
 
+            // 最後の 200 ターンは 0 枚目のみを購入
+            if( i >= T - 200 ) best_card = 0;
             state.buyCard(best_card, cand_card);
             cout << best_card << "\n" << flush;
             
@@ -350,6 +352,7 @@ struct Solver {
             for(int i=0; i<state.project.size(); i++) cerr << state.project[i].h << " " << state.project[i].v << "\n" << flush;
             cerr << "\n\n\n" << flush;
         }
+
         return;
     }
 };
