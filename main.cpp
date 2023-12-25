@@ -39,7 +39,7 @@ inline double gaussian(double mean, double stddev) {
 //-----------------以下から実装部分-----------------//
 
 constexpr int T = 1000;
-constexpr int TEST_NUM = 200;
+constexpr int TEST_NUM = 0;
 static const vector<int> X = {20/2, 10/2, 10/2, 5/2, 3/2}; // 隠しパラメータの期待値
 constexpr int EX = (20 + 10 + 10 + 5 + 3) / 2;   // 隠しパラメータの期待値の総和
 int N, M, K, _;
@@ -59,10 +59,11 @@ struct State{
     vector<int> card_cnt;
     vector<Card> hand;
     vector<Project> project;
+    vector<pair<Project,int>> sorted_project;
     int money = 0, total_get_money = 0, recent_use_hand_id, L = 0;
 
-    double best_expectation, worst_expectation, expectation;
-    int best_project, worst_project, pro_cnt;
+    double expectation;
+    int pro_cnt;
 
     State() {}
     explicit State(vector<Card> _hand, vector<Project> _project, bool _is_test) : hand(_hand), project(_project), is_test(_is_test) {
@@ -73,20 +74,11 @@ struct State{
     }
 
     inline void bestWorstUpdate() {
-        best_expectation = 0, worst_expectation = 1e16;
-        for(int i=0; i<M; i++) {
-            expectation = (double)project[i].v / project[i].h;
-            // Best : v / h が最大
-            if( best_expectation < expectation ) {
-                best_expectation = expectation;
-                best_project = i;
-            }
-            // Worst : v / h が最小
-            if( worst_expectation > expectation ) {
-                worst_expectation = expectation;
-                worst_project = i;
-            }
-        }
+        sorted_project.clear();
+        for(int i=0; i<M; i++) sorted_project.emplace_back(make_pair(project[i],i));
+        sort(sorted_project.begin(), sorted_project.end(), [&](const auto &a, const auto &b) {
+            return (a.first.v+5*pow(2,L)) * b.first.h > (b.first.v+5*pow(2,L)) * a.first.h;
+        });
         return;
     }
 
@@ -156,7 +148,7 @@ struct State{
                 break;
             }
             // キャンセルカード : 増資カードの次に優先で使用 ( 期待値低いものをキャンセル )
-            if( hand[j].t == 2 && worst_expectation < (card_cnt[2] == N-1 ? 1.05 : 1.00) ) {
+            if( hand[j].t == 2 && (double)sorted_project.back().first.v/sorted_project.back().first.h < (card_cnt[2] == N-1 ? 1.05 : 1.00) ) {
                 op = j;
                 break;
             }
@@ -174,24 +166,37 @@ struct State{
             }
         }
         // 労働カードの場合 : best_project を選択, 業務転換カードの場合 : worst_project を選択
-        return pair(op, ( hand[op].t == 0 ? best_project : ( hand[op].t == 2 ? worst_project : 0 ) ));
+        // ※ ただその project より金がかかったカードは使用しない
+        int sub = -1;
+        if( hand[op].t == 0 ) {
+            for(int i=0; i<M; i++) {
+                // card がオーバー過ぎる価値を持ってる or オーバー過ぎる能力を持ってる時はスルー
+                if( sorted_project[i].first.v > hand[op].p && hand[op].w <= sorted_project[i].first.h*3 ) {
+                    sub = sorted_project[i].second;
+                    break;
+                }
+            }
+        }
+        if( sub == -1 ) sub = ( hand[op].t == 0 ? sorted_project[0].second : ( hand[op].t == 2 ? sorted_project.back().second : 0 ) );
+        
+        return pair(op, sub);
     }
 
     inline int selectBuyCard(int turn, const vector<Card> &cand_card) {
         // ~~~~~~~~~~~~~~~~~~~~~~~ 貪欲で購入カード選択 ~~~~~~~~~~~~~~~~~~~~~~~ //
         // card : w-p が一番高いものを選択 ( 実は期待値が高いものは進展が遅く効率悪 )
         int best_card = 0, best_price = (int)1e16, semi_price = (int)1e16;
-        double best_expectation = 0;
+        double best_expectation = 0.0;
         for(int j=0; j<K; j++) {
-            // 購入後金欠になりそうならスルー
+            // そもそも購入不可 or 購入後金欠になりそうならスルー
             if( (double)cand_card[j].p * 1.5 > money ) continue;
-            if( (cand_card[j].t == 0 || cand_card[j].t == 1) && money ) {
+            if( cand_card[j].t == 0 || cand_card[j].t == 1 ) {
                 if( best_expectation < cand_card[j].w * (cand_card[j].t == 1 ? 0.8*M : 1) - cand_card[j].p ) {
                     best_expectation = cand_card[j].w * (cand_card[j].t == 1 ? 0.8*M : 1) - cand_card[j].p;
                     best_card = j;
                 }
             }
-            else if( cand_card[j].t == 2 && card_cnt[0]+card_cnt[1] != 0 ) {
+            else if( cand_card[j].t == 2 && card_cnt[0]+card_cnt[1] != 0 && turn < T - 50 ) {
                 // キャンセルカードは購入可能なら優先で買う
                 if( best_price == (int)1e16 && semi_price > cand_card[j].p ) {
                     best_card = j;
@@ -199,9 +204,9 @@ struct State{
                     semi_price = cand_card[j].p;
                 }
             }
-            else if( cand_card[j].t == 4 && turn < T - 50 ) {
+            else if( cand_card[j].t == 4 && turn < T - 150 ) {
                 // 増資カードが購入可能 ⇒ 最優先で買う
-                // ※ ただし最後の 50 ターンは買わない
+                // ※ ただし最後の 150 ターンは買わない
                 if( best_price > cand_card[j].p ) {
                     best_card = j;
                     best_expectation = 1e16;
@@ -215,7 +220,7 @@ struct State{
     int simulate(int turn, int card_id, const vector<vector<Card>> &tester, vector<Project> &pro_tester) {
         pro_cnt = 0;
         total_get_money = 0;
-        useCard(card_id, ( hand[card_id].t == 0 ? best_project : ( hand[card_id].t == 2 ? worst_project : 0 ) ), pro_tester);
+        useCard(card_id, ( hand[card_id].t == 0 ? sorted_project[0].second : ( hand[card_id].t == 2 ? sorted_project.back().second : 0 ) ), pro_tester);
         for(int i=turn; i<T; i++) {
             // 貪欲で選択 ⇒ 最後まで遂行して期待値算出
             if( i != turn ) {
@@ -335,7 +340,7 @@ struct Solver {
         for(int i=0; i<N; i++) {
             if( best_score < scores[i] ) {
                 best_score = scores[i];
-                best_op = make_pair(i, ( state.hand[i].t == 0 ? state.best_project : ( state.hand[i].t == 2 ? state.worst_project : 0 )));
+                best_op = make_pair(i, ( state.hand[i].t == 0 ? state.sorted_project[0].second : ( state.hand[i].t == 2 ? state.sorted_project.back().second : 0 ) ));
             }
         }
         return best_op;
