@@ -55,18 +55,21 @@ struct Project {
 };
 
 struct State{
-    bool is_test;
+    bool is_test, pre_execute = false;
+    vector<int> card_cnt;
     vector<Card> hand;
     vector<Project> project;
-    int money = 0, total_get_money = 0, recent_use_hand_id, pre_hand_t = -1, L = 0;
+    int money = 0, total_get_money = 0, recent_use_hand_id, L = 0;
 
     double best_expectation, worst_expectation, expectation;
-    int best_project, worst_project;
+    int best_project, worst_project, pro_cnt;
 
     State() {}
     explicit State(vector<Card> _hand, vector<Project> _project, bool _is_test) : hand(_hand), project(_project), is_test(_is_test) {
         // 最初に期待値が最大・最小の project を求めておく
         bestWorstUpdate();
+        card_cnt.assign(5,0);
+        for(int i=0; i<N; i++) card_cnt[hand[i].t]++;
     }
 
     inline void bestWorstUpdate() {
@@ -87,20 +90,20 @@ struct State{
         return;
     }
 
-    inline void useCard(int card_id, int work) { // カード使用
+    inline void useCard(int card_id, int work, const vector<Project> &pro_tester) { // カード使用
         recent_use_hand_id = card_id;
-        pre_hand_t = hand[card_id].t;
+        pre_execute = false;
+        card_cnt[hand[card_id].t]--;
+
         if( hand[card_id].t == 0 ) { // 通常労働カード
             project[work].h -= hand[card_id].w * ( is_test ? pow(2,L) : 1 );
+            pre_execute |= (project[work].h <= 0);
             if( project[work].h <= 0 ) {
                 money += project[work].v * ( is_test ? pow(2,L) : 1 );
                 total_get_money += project[work].v * ( is_test ? pow(2,L) : 1 );
                 if( is_test ) {
                     double rnd = rand_double()*6.0 + 2.0;
-                    project[work] = Project{
-                        (int)(round(pow(2,rnd)) * pow(2,L)),
-                        (int)(round(pow(2,max(0.0,min(10.0,gaussian(rnd,0.5))))) * pow(2,L)),
-                    };
+                    project[work] = pro_tester[pro_cnt++];
                     bestWorstUpdate();
                 }
             }
@@ -108,15 +111,13 @@ struct State{
         else if( hand[card_id].t == 1 ) { // 全力労働カード
             for(int i=0; i<M; i++) {
                 project[i].h -= hand[card_id].w * ( is_test ? pow(2,L) : 1 );
+                pre_execute |= (project[i].h <= 0);
                 if( project[i].h <= 0 ) {
-                    money += project[work].v * ( is_test ? pow(2,L) : 1 );
-                    total_get_money += project[work].v * ( is_test ? pow(2,L) : 1 );
+                    money += project[i].v * ( is_test ? pow(2,L) : 1 );
+                    total_get_money += project[i].v * ( is_test ? pow(2,L) : 1 );
                     if( is_test ) {
                         double rnd = rand_double()*6.0 + 2.0;
-                        project[work] = Project{
-                            (int)(round(pow(2,rnd)) * pow(2,L)),
-                            (int)(round(pow(2,max(0.0,min(10.0,gaussian(rnd,0.5))))) * pow(2,L)),
-                        };
+                        project[i] = pro_tester[pro_cnt++];
                     }
                 }
             }
@@ -124,27 +125,22 @@ struct State{
         }
         else if( hand[card_id].t == 2 && is_test ) { // キャンセルカード
             double rnd = rand_double()*6.0 + 2.0;
-            project[work] = Project{
-                (int)(round(pow(2,rnd)) * pow(2,L)),
-                (int)(round(pow(2,max(0.0,min(10.0,gaussian(rnd,0.5))))) * pow(2,L)),
-            };
+            project[work] = pro_tester[pro_cnt++];
             bestWorstUpdate();
         }
         else if( hand[card_id].t == 3 && is_test ) { // 業務転換カード
             for(int i=0; i<M; i++) {
                 double rnd = rand_double()*6.0 + 2.0;
-                project[i] = Project{
-                    (int)(round(pow(2,rnd)) * pow(2,L)),
-                    (int)(round(pow(2,max(0.0,min(10.0,gaussian(rnd,0.5))))) * pow(2,L)),
-                };
+                project[i] = pro_tester[pro_cnt++];
             }
             bestWorstUpdate();
         }
-        else L++; // 増資カード
+        else if( hand[card_id].t == 4 ) L++; // 増資カード
         return;
     }
 
     inline void buyCard(int card_id, const vector<Card> &cards) { // カード購入
+        card_cnt[cards[card_id].t]++;
         hand[recent_use_hand_id] = cards[card_id];
         money -= cards[card_id].p * ( is_test ? pow(2,L) : 1 );
         return;
@@ -159,13 +155,13 @@ struct State{
                 op = j;
                 break;
             }
-            // キャンセルカード : 増資カードの次に優先で使用
-            if( hand[j].t == 2 ) {
+            // キャンセルカード : 増資カードの次に優先で使用 ( 期待値低いものをキャンセル )
+            if( hand[j].t == 2 && worst_expectation < (card_cnt[2] == N-1 ? 1.05 : 1.00) ) {
                 op = j;
                 break;
             }
             // 業務転換カード : 前回 best_project が遂行された場合のみ使用
-            if( hand[j].t == 3 && pre_hand_t == 0 ) {
+            if( hand[j].t == 3 && pre_execute ) {
                 best_card_expectation = (int)1e16;
                 op = j;
                 continue;
@@ -184,23 +180,28 @@ struct State{
     inline int selectBuyCard(int turn, const vector<Card> &cand_card) {
         // ~~~~~~~~~~~~~~~~~~~~~~~ 貪欲で購入カード選択 ~~~~~~~~~~~~~~~~~~~~~~~ //
         // card : w-p が一番高いものを選択 ( 実は期待値が高いものは進展が遅く効率悪 )
-
-        // 最後 100 ターンは 0枚目のカードしか買わない
-        if( turn > T - 100 ) return 0;
-
-        int best_card = 0, best_price = (int)1e16;
+        int best_card = 0, best_price = (int)1e16, semi_price = (int)1e16;
         double best_expectation = 0;
         for(int j=0; j<K; j++) {
-            if( cand_card[j].p > money ) continue; // そもそも購入不可は論外
-            if( cand_card[j].t == 0 || cand_card[j].t == 1 ) {
-                if( best_expectation < cand_card[j].w * (cand_card[j].t == 1 ? M : 1) - cand_card[j].p ) {
-                    best_expectation = cand_card[j].w * (cand_card[j].t == 1 ? M : 1) - cand_card[j].p;
+            // 購入後金欠になりそうならスルー
+            if( (double)cand_card[j].p * 1.5 > money ) continue;
+            if( (cand_card[j].t == 0 || cand_card[j].t == 1) && money ) {
+                if( best_expectation < cand_card[j].w * (cand_card[j].t == 1 ? 0.8*M : 1) - cand_card[j].p ) {
+                    best_expectation = cand_card[j].w * (cand_card[j].t == 1 ? 0.8*M : 1) - cand_card[j].p;
                     best_card = j;
                 }
             }
-            else if( cand_card[j].t == 4 && turn < T - 200 ) {
+            else if( cand_card[j].t == 2 && card_cnt[0]+card_cnt[1] != 0 ) {
+                // キャンセルカードは購入可能なら優先で買う
+                if( best_price == (int)1e16 && semi_price > cand_card[j].p ) {
+                    best_card = j;
+                    best_expectation = 1e8;
+                    semi_price = cand_card[j].p;
+                }
+            }
+            else if( cand_card[j].t == 4 && turn < T - 50 ) {
                 // 増資カードが購入可能 ⇒ 最優先で買う
-                // ※ ただし最後の 200 ターンは買わない
+                // ※ ただし最後の 50 ターンは買わない
                 if( best_price > cand_card[j].p ) {
                     best_card = j;
                     best_expectation = 1e16;
@@ -211,14 +212,15 @@ struct State{
         return best_card;
     }
 
-    int simulate(int turn, int card_id, const vector<vector<Card>> &tester) {
+    int simulate(int turn, int card_id, const vector<vector<Card>> &tester, vector<Project> &pro_tester) {
+        pro_cnt = 0;
         total_get_money = 0;
-        useCard(card_id, ( hand[card_id].t == 0 ? best_project : ( hand[card_id].t == 2 ? worst_project : 0 ) ));
+        useCard(card_id, ( hand[card_id].t == 0 ? best_project : ( hand[card_id].t == 2 ? worst_project : 0 ) ), pro_tester);
         for(int i=turn; i<T; i++) {
             // 貪欲で選択 ⇒ 最後まで遂行して期待値算出
             if( i != turn ) {
                 auto [op, subject] = selectUseCard();
-                useCard(op, subject);
+                useCard(op, subject, pro_tester);
             }
             auto card_id = selectBuyCard(i, tester[i]);
             buyCard(card_id, tester[i]);
@@ -231,7 +233,8 @@ struct Solver {
     State state;
     vector<Card> cards, cand_card;
     vector<Project> projects;
-    vector<vector<vector<Card>>> tester;
+    vector<vector<Project>> project_tester;
+    vector<vector<vector<Card>>> card_tester;
 
     vector<int> scores;
 
@@ -241,7 +244,8 @@ struct Solver {
         cand_card.assign(K,Card{0,0,0});
 
         // 乱択 test 生成
-        tester.assign(TEST_NUM, vector<vector<Card>>(T));
+        project_tester.assign(TEST_NUM, vector<Project>(T));
+        card_tester.assign(TEST_NUM, vector<vector<Card>>(T));
         for(int i=0; i<TEST_NUM; i++) for(int j=0; j<T; j++) for(int k=0; k<K; k++) {
             Card test_card;
             int rnd1 = rand_int()%EX;
@@ -277,7 +281,14 @@ struct Solver {
                 test_card.w = 0;
                 test_card.p = (rand_int()%801 + 200);
             }
-            tester[i][j].emplace_back(test_card);
+            card_tester[i][j].emplace_back(test_card);
+        }
+        for(int i=0; i<TEST_NUM; i++) for(int j=0; j<T; j++) {
+            double rnd = rand_double()*6.0 + 2.0;
+            project_tester[i][j] = Project{
+                (int)(round(pow(2,rnd))),
+                (int)(round(pow(2,max(0.0,min(10.0,gaussian(rnd,0.5)))))),
+            };
         }
     }
 
@@ -313,7 +324,7 @@ struct Solver {
                 // 何の Card を使うかだけ全探索 ⇒ 残りは全貪欲で Montecalro
                 State branch = state;
                 branch.is_test = true;
-                scores[i] += branch.simulate(turn, i, tester[counter]);
+                scores[i] += branch.simulate(turn, i, card_tester[counter], project_tester[counter]);
             }
             counter--;
         }
@@ -336,6 +347,7 @@ struct Solver {
         for(int turn=0; turn<T; turn++) {
             // cerr << "Turn " << turn << "\n" << flush;
             // cerr << "First hand: \n" << flush;
+            // cerr << "L: " << state.L << "\n" << flush;
             // for(int i=0; i<state.hand.size(); i++) cerr << state.hand[i].t << " " << state.hand[i].w << " " << state.hand[i].p << "\n" << flush;
             // cerr << "First Project: \n" << flush;
             // for(int i=0; i<state.project.size(); i++) cerr << state.project[i].h << " " << state.project[i].v << "\n" << flush;
@@ -348,7 +360,7 @@ struct Solver {
             auto [op, subject] = state.selectUseCard(); // 貪欲ver
             // auto [op, subject] = monte_carlo_method(turn);
             cout << op << " " << subject << '\n' << flush;
-            state.useCard(op, subject);
+            state.useCard(op, subject, project_tester[turn]);
             
             // 状況確認 part
             for(int j=0; j<M; j++) {
