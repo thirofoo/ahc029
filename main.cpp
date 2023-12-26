@@ -27,26 +27,49 @@ inline double rand_double() {
     return (double)(rand_int()%(int)1e9)/1e9;
 }
 
-#define TIME_LIMIT 1600
-// #define TIME_LIMIT 15000
+inline double rand_normal(double mu, double sig) {
+    static bool has_value = false;
+    static double z1;
+
+    if (has_value) {
+        has_value = false;
+        return z1 * sig + mu;
+    } else {
+        double u, v, s;
+        do {
+            u = 2.0 * rand_double() - 1.0;
+            v = 2.0 * rand_double() - 1.0;
+            s = u * u + v * v;
+        } while (s >= 1.0 || s == 0.0);
+
+        double mul = sqrt(-2.0 * log(s) / s);
+        z1 = u * mul;
+        has_value = true;
+
+        return z1 * sig + mu;
+    }
+}
+
+// #define TIME_LIMIT 1600
+#define TIME_LIMIT 8000
+// #define TIME_LIMIT 30000
 
 //-----------------以下から実装部分-----------------//
 
 constexpr int T = 1000;
-constexpr int MONTE_TURN = 50;
-constexpr int TEST_NUM = 3000;
-static const vector<int> X = {20/2, 10/2, 10/2, 5/2, 3/2}; // 隠しパラメータの期待値
-constexpr int EX = (20 + 10 + 10 + 5 + 3) / 2;   // 隠しパラメータの期待値の総和
+constexpr int MONTE_TURN = 100;
+constexpr int TEST_NUM = 500;
 int N, M, K, _;
+static const vector<int> r2 = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824};
 
 struct Card {
     // t:種類, w:労働力, p:購入額
-    int t, w, p;
+    long long t, w, p;
 };
 
 struct Project {
     // h:残務量, v:価値
-    int h, v;
+    long long h, v;
 };
 
 struct State{
@@ -71,7 +94,7 @@ struct State{
         sorted_project.clear();
         for(int i=0; i<M; i++) sorted_project.emplace_back(make_pair(project[i],i));
         sort(sorted_project.begin(), sorted_project.end(), [&](const auto &a, const auto &b) {
-            return (a.first.v+5*pow(2,L)) * b.first.h > (b.first.v+5*pow(2,L)) * a.first.h;
+            return (a.first.v+5*r2[L]) * b.first.h > (b.first.v+5*r2[L]) * a.first.h;
         });
         return;
     }
@@ -88,8 +111,8 @@ struct State{
                 money += project[work].v;
                 if( is_test ) {
                     project[work] = pro_tester[(pro_cnt++)%pro_tester.size()];
-                    project[work].h *= ( is_test ? pow(2,L) : 1 );
-                    project[work].v *= ( is_test ? pow(2,L) : 1 );
+                    project[work].h *= ( is_test ? r2[L] : 1 );
+                    project[work].v *= ( is_test ? r2[L] : 1 );
                     bestWorstUpdate();
                 }
             }
@@ -102,8 +125,8 @@ struct State{
                     money += project[i].v;
                     if( is_test ) {
                         project[i] = pro_tester[(pro_cnt++)%pro_tester.size()];
-                        project[i].h *= pow(2,L);
-                        project[i].v *= pow(2,L);
+                        project[i].h *= r2[L];
+                        project[i].v *= r2[L];
                     }
                 }
             }
@@ -111,15 +134,15 @@ struct State{
         }
         else if( hand[card_id].t == 2 && is_test ) { // キャンセルカード
             project[work] = pro_tester[(pro_cnt++)%pro_tester.size()];
-            project[work].h *= pow(2,L);
-            project[work].v *= pow(2,L);
+            project[work].h *= r2[L];
+            project[work].v *= r2[L];
             bestWorstUpdate();
         }
         else if( hand[card_id].t == 3 && is_test ) { // 業務転換カード
             for(int i=0; i<M; i++) {
                 project[i] = pro_tester[(pro_cnt++)%pro_tester.size()];
-                project[i].h *= pow(2,L);
-                project[i].v *= pow(2,L);
+                project[i].h *= r2[L];
+                project[i].v *= r2[L];
             }
             bestWorstUpdate();
         }
@@ -131,8 +154,8 @@ struct State{
     inline void buyCard(int card_id, const vector<Card> &cards) { // カード購入
         card_cnt[cards[card_id].t]++;
         hand[recent_use_hand_id] = cards[card_id];
-        hand[recent_use_hand_id].w *= ( is_test & f ? pow(2,L) : 1 );
-        hand[recent_use_hand_id].p *= ( is_test & f ? pow(2,L) : 1 );
+        hand[recent_use_hand_id].w *= ( is_test & f ? r2[L] : 1 );
+        hand[recent_use_hand_id].p *= ( is_test & f ? r2[L] : 1 );
         money -= hand[recent_use_hand_id].p;
         return;
     }
@@ -188,28 +211,28 @@ struct State{
         double best_expectation = 0.0;
         for(int j=0; j<K; j++) {
             // そもそも購入不可 or 購入後金欠になりそうならスルー
-            if( (double)cand_card[j].p * ( is_test ? pow(2,L) : 1 ) * 1.5 > money ) continue;
+            if( (double)cand_card[j].p * ( is_test ? r2[L] : 1 ) * 1.5 > money ) continue;
             if( cand_card[j].t == 0 || cand_card[j].t == 1 ) {
-                if( best_expectation < cand_card[j].w * ( is_test ? pow(2,L) : 1 ) * (cand_card[j].t == 1 ? 0.8*M : 1) - cand_card[j].p * ( is_test ? pow(2,L) : 1 ) ) {
-                    best_expectation = cand_card[j].w * ( is_test ? pow(2,L) : 1 ) * (cand_card[j].t == 1 ? 0.8*M : 1) - cand_card[j].p * ( is_test ? pow(2,L) : 1 );
+                if( best_expectation < cand_card[j].w * ( is_test ? r2[L] : 1 ) * (cand_card[j].t == 1 ? 0.8*M : 1) - cand_card[j].p * ( is_test ? r2[L] : 1 ) ) {
+                    best_expectation = cand_card[j].w * ( is_test ? r2[L] : 1 ) * (cand_card[j].t == 1 ? 0.8*M : 1) - cand_card[j].p * ( is_test ? r2[L] : 1 );
                     best_card = j;
                 }
             }
-            else if( cand_card[j].t == 2 && cand_card[j].p * ( is_test ? pow(2,L) : 1 ) <= 8*pow(2,L) && card_cnt[0]+card_cnt[1] != 0 && turn < T - 50 ) {
+            else if( cand_card[j].t == 2 && cand_card[j].p * ( is_test ? r2[L] : 1 ) <= 8*r2[L] && card_cnt[0]+card_cnt[1] != 0 && turn < T - 50 ) {
                 // キャンセルカードは購入可能なら優先で買う
-                if( best_price == (int)1e16 && semi_price > cand_card[j].p * ( is_test ? pow(2,L) : 1 ) ) {
+                if( best_price == (int)1e16 && semi_price > cand_card[j].p * ( is_test ? r2[L] : 1 ) ) {
                     best_card = j;
                     best_expectation = 1e8;
-                    semi_price = cand_card[j].p * ( is_test ? pow(2,L) : 1 );
+                    semi_price = cand_card[j].p * ( is_test ? r2[L] : 1 );
                 }
             }
             else if( cand_card[j].t == 4 && turn < T - 100 ) {
                 // 増資カードが購入可能 ⇒ 最優先で買う
                 // ※ ただし最後の 150 ターンは買わない
-                if( best_price > cand_card[j].p * ( is_test ? pow(2,L) : 1 ) ) {
+                if( best_price > cand_card[j].p * ( is_test ? r2[L] : 1 ) ) {
                     best_card = j;
                     best_expectation = 1e16;
-                    best_price = cand_card[j].p * ( is_test ? pow(2,L) : 1 );
+                    best_price = cand_card[j].p * ( is_test ? r2[L] : 1 );
                 }
             }
         }
@@ -223,11 +246,36 @@ struct State{
 
         pro_cnt = 0;
         for(int i=turn+1; i<T; i++) {
+
+            // if( turn == 901 ) {
+            //     cerr << "Turn " << turn << "\n" << flush;
+            //     cerr << "First Money: " << money << "\n" << flush;
+            //     cerr << "First hand: \n" << flush;
+            //     cerr << "L: " << L << "\n" << flush;
+            //     for(int j=0; j<hand.size(); j++) cerr << hand[j].t << " " << hand[j].w << " " << hand[j].p << "\n" << flush;
+            //     cerr << "First Project: \n" << flush;
+            //     for(int j=0; j<project.size(); j++) cerr << project[j].h << " " << project[j].v << "\n" << flush;
+            //     cerr << '\n' << flush;
+            // }
+
             // 残りターンは全部貪欲
             auto [op, subject] = selectUseCard();
             useCard(op, subject, pro_tester);
             auto card_id = selectBuyCard(i, tester[i]);
             buyCard(card_id, tester[i]);
+
+            // if( turn == 901 ) {
+            //     cerr << "Cand Card: \n" << flush;
+            //     for(int j=0; j<tester[i].size(); j++) cerr << tester[i][j].t << " " << tester[i][j].w * r2[L] << " " << tester[i][j].p * r2[L] << "\n" << flush;
+            //     cerr << "Buy card: " << card_id << '\n' << flush;
+            //     cerr << "Last Money: " << money << "\n" << flush;
+            //     cerr << "Last hand: \n" << flush;
+            //     for(int j=0; j<hand.size(); j++) cerr << hand[j].t << " " << hand[j].w << " " << hand[j].p << "\n" << flush;
+            //     cerr << "Last Project: \n" << flush;
+            //     for(int j=0; j<project.size(); j++) cerr << project[j].h << " " << project[j].v << "\n" << flush;
+            //     cerr << "\n\n" << flush;
+            // }
+
         }
         return money;
     }
@@ -239,24 +287,44 @@ struct Solver {
     vector<Project> projects;
     vector<vector<Project>> project_tester;
     vector<vector<vector<Card>>> card_tester;
+    vector<int> X; // 過去の結果から隠しパラメータ推定する為の配列
 
-    vector<long long> scores;
+    vector<long double> scores;
 
     Solver() {
         this->input();
         state = State(cards, projects, false);
         cand_card.assign(K,Card{0,0,0});
+        X.assign(5,0);
+        utility::mytm.CodeStart();
+    }
 
-        std::random_device seed;
-	    std::mt19937 engine(seed()); 
-        utility::mytm.CodeStart();        
+    void input(){
+        cin >> N >> M >> K >> _;
+        for(int i=0; i<N; i++) {
+            int t, w; cin >> t >> w;
+            cards.emplace_back(Card{t,w,0});
+        }
+        for(int i=0; i<M; i++) {
+            int h, v; cin >> h >> v;
+            projects.emplace_back(Project{h,v});
+        }
+        return;
+    }
 
+    void output(){
+        cout << state.money << endl;
+        // cerr << "Time Passed: " << utility::mytm.elapsed() << " ms\n" << flush;
+        return;
+    }
+
+    void genRandomTest() {
         // 乱択 test 生成
-        project_tester.assign(TEST_NUM, vector<Project>(T));
+        project_tester.assign(TEST_NUM,vector<Project>(T));
         card_tester.assign(TEST_NUM, vector<vector<Card>>(T));
         for(int i=0; i<TEST_NUM; i++) for(int j=T-MONTE_TURN; j<T; j++) for(int k=0; k<K; k++) {
             Card test_card;
-            int rnd1 = rand_int()%EX;
+            int rnd1 = rand_int()%(X[0]+X[1]+X[2]+X[3]+X[4]);
             if( k == 0 ) { // 先頭の無料カード
                 test_card.t = 0;
                 test_card.w = 1;
@@ -265,14 +333,12 @@ struct Solver {
             else if( rnd1 < X[0] ) { // 通常労働カード
                 test_card.t = 0;
                 test_card.w = rand_int()%50 + 1;
-                std::normal_distribution<> dist((double)test_card.w, (double)test_card.w/3);
-                test_card.p = max(1,min(10000,(int)round(dist(engine))));
+                test_card.p = max(1,min(10000,(int)round(rand_normal((double)test_card.w,(double)test_card.w/3))));
             }
             else if( rnd1 < X[0] + X[1] ) { // 全力労働カード
                 test_card.t = 1;
                 test_card.w = rand_int()%50 + 1;
-                std::normal_distribution<> dist((double)test_card.w, (double)test_card.w/3);
-                test_card.p = max(1,min(10000,(int)round(dist(engine))));
+                test_card.p = max(1,min(10000,(int)round(rand_normal((double)test_card.w,(double)test_card.w/3))));
             }
             else if( rnd1 < X[0] + X[1] + X[2] ) { // キャンセルカード
                 test_card.t = 2;
@@ -296,27 +362,9 @@ struct Solver {
             std::normal_distribution<> dist(rnd,0.5);
             project_tester[i][j] = Project{
                 (int)(round(pow(2,rnd))),
-                (int)(round(pow(2,max(0.0,min(10.0,dist(engine)))))),
+                (int)(round(pow(2,max(0.0,min(10.0,rand_normal(rnd,0.5)))))),
             };
         }
-    }
-
-    void input(){
-        cin >> N >> M >> K >> _;
-        for(int i=0; i<N; i++) {
-            int t, w; cin >> t >> w;
-            cards.emplace_back(Card{t,w,0});
-        }
-        for(int i=0; i<M; i++) {
-            int h, v; cin >> h >> v;
-            projects.emplace_back(Project{h,v});
-        }
-        return;
-    }
-
-    void output(){
-        cout << state.money << endl;
-        // cerr << "Time Passed: " << utility::mytm.elapsed() << " ms\n" << flush;
         return;
     }
 
@@ -326,48 +374,49 @@ struct Solver {
         double rate = (double)(T - turn + 10) / ((T - turn) * ( T - turn + 21 ) / 2);
         double end_time = utility::mytm.elapsed() + rate * rest_time;
         int counter = TEST_NUM - 1;
-        cerr << "Rate: " << rate << "\n" << flush;
-        cerr << "Now Time: " << utility::mytm.elapsed() << " ms\n" << flush;
-        cerr << "End Time: " << end_time << " ms\n" << flush;
+        // cerr << "Rate: " << rate << "\n" << flush;
+        // cerr << "Now Time: " << utility::mytm.elapsed() << " ms\n" << flush;
+        // cerr << "End Time: " << end_time << " ms\n" << flush;
+        // cerr << "Having Money: " << state.money << "\n" << flush;
 
         int cant_buy_cnt = 0;
-        for(int i=0; i<K; i++) if( state.money < cand_card[i].p ) cant_buy_cnt++;
+        for(int i=0; i<K; i++) if( state.money < 1.5 * cand_card[i].p || cand_card[i].t == 4 ) cant_buy_cnt++;
         if( cant_buy_cnt == K-1 ) return 0; // 買えるのが 0 枚目しか無い時は問答無用で 0 を返す
 
         scores.assign(K,0);
         while (utility::mytm.elapsed() < end_time && counter) {
             for(int i=0; i<K; i++) {
-                if( state.money < cand_card[i].p ) continue;
+                if( state.money < 1.5 * cand_card[i].p || cand_card[i].t == 4 ) continue;
                 // 購入 part を Montecalro で評価
                 State branch = state;
                 branch.is_test = true;
-                int test_score = branch.simulate(turn, i, cand_card, card_tester[counter], project_tester[counter]);
-                scores[i] += test_score;
+                long long test_score = branch.simulate(turn, i, cand_card, card_tester[counter], project_tester[counter]);
+                scores[i] += log(test_score); // 対数スケールで評価
                 // cerr << test_score << " ";
             }
             counter--;
         }
-        cerr << "\nCounter: " << TEST_NUM-1-counter << "\n" << flush;
+        // cerr << "\nCounter: " << TEST_NUM-1-counter << "\n" << flush;
         int best_card = 0;
-        long long best_score = -1;
+        long double best_score = 0.0;
         for(int i=0; i<K; i++) {
-            cerr << scores[i] << " ";
+            // cerr << scores[i] << " ";
             if( state.money < cand_card[i].p ) continue;
             if( best_score < scores[i] ) {
                 best_score = scores[i];
                 best_card = i;
             }
         }
-        cerr << '\n';
-        for(int i=0; i<K; i++) cerr << scores[i] / (TEST_NUM-1-counter) << " ";
-        cerr << "\n\n" << flush;
+        // cerr << '\n';
+        // for(int i=0; i<K; i++) cerr << scores[i] / (TEST_NUM-1-counter) << " ";
+        // cerr << "\n\n" << flush;
         return best_card;
     }
 
     void solve(){
         // ~~~~~~~~~~~~~~~~~~~~ Montecalro method ~~~~~~~~~~~~~~~~~~~~ //
         for(int turn=0; turn<T; turn++) {
-            cerr << "Turn " << turn << "\n" << flush;
+            // cerr << "Turn " << turn << "\n" << flush;
             // cerr << "First hand: \n" << flush;
             // cerr << "L: " << state.L << "\n" << flush;
             // for(int i=0; i<state.hand.size(); i++) cerr << state.hand[i].t << " " << state.hand[i].w << " " << state.hand[i].p << "\n" << flush;
@@ -379,7 +428,7 @@ struct Solver {
             // Card 使用 part
             auto [op, subject] = state.selectUseCard();
             cout << op << " " << subject << '\n' << flush;
-            state.useCard(op, subject, project_tester[turn]);
+            state.useCard(op, subject, {});
             
             // 状況確認 part
             for(int j=0; j<M; j++) {
@@ -391,13 +440,20 @@ struct Solver {
             for(int j=0; j<K; j++) {
                 int t, w, p; cin >> t >> w >> p;
                 cand_card[j] = Card{t,w,p};
+                X[t]++;
+            }
+            // 過去のカード出現頻度から乱択 test 生成
+            if( turn == T-MONTE_TURN ) {
+                genRandomTest();
+                for(int j=0; j<5; j++) cerr << X[j] << " ";
+                cerr << "\n\n" << flush;
             }
 
             // Card 購入 part
             int card_id;
-            if( turn <= T-MONTE_TURN ) card_id = state.selectBuyCard(turn, cand_card);
-            else card_id = monte_carlo_method(turn);
-            // card_id = state.selectBuyCard(turn, cand_card);// 貪欲ver
+            // if( turn <= T-MONTE_TURN ) card_id = state.selectBuyCard(turn, cand_card);
+            // else card_id = monte_carlo_method(turn);
+            card_id = state.selectBuyCard(turn, cand_card);// 貪欲ver
             // card_id = monte_carlo_method(turn);
             cout << card_id << '\n' << flush;
             state.buyCard(card_id, cand_card);
